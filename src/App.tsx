@@ -592,9 +592,9 @@ function App() {
       <div className="stream-background" aria-hidden="true">
         <div ref={playerHostRef} className="stream-player" />
       </div>
-      <header className="brand" aria-label="Study with me, by Gridfiti">
-        <span className="brand-script">study with me.</span>
-        <span className="brand-byline">BY GRIDFITI</span>
+      <header className="brand" aria-label="Study lah">
+        <span className="brand-script">study lah.</span>
+        <span className="brand-byline">YES this vibecoded</span>
       </header>
 
       <div className="scene-menu">
