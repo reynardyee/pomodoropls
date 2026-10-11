@@ -10,6 +10,24 @@
     linear-gradient(180deg, #ad87a8 0%, #74709e 36%, #244f8b 66%, #123a71 100%);
 }
 
+.mini-player-error {
+  max-width: 260px;
+  color: #ffe2e2;
+  font-size: 12px;
+  line-height: 1.4;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+
+.mini-player-canvas,
+.mini-player-video {
+  position: fixed;
+  top: 0;
+  left: -2000px;
+  width: 1280px;
+  height: 720px;
+  pointer-events: none;
+}
+
 .stream-background {
   position: absolute;
   z-index: 0;
@@ -827,6 +845,37 @@
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.mini-player-button {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: #fff;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.mini-player-button:hover {
+  transform: scale(1.1);
+  opacity: 0.78;
+}
+
+.mini-player-button svg {
+  width: 29px;
+  height: 29px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.mini-player-button svg path {
+  fill: rgba(255, 255, 255, 0.45);
 }
 
 .volume-control {

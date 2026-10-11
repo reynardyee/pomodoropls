@@ -36,3 +36,5 @@ See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rule
 The `main` branch is built and deployed to GitHub Pages by the workflow in `.github/workflows/deploy.yml`.
 In the repository settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
 The Vite base path is configured for this repository's project site at `/pomodoropls/`.
+
+The always-on-top mini-player renders its image and timer to a canvas-backed video and uses the browser's native video Picture-in-Picture API. It is available on desktop in browsers that support video Picture-in-Picture, and intentionally hidden on mobile.

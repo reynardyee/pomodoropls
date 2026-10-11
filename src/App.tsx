@@ -285,12 +285,23 @@ function formatTime(seconds: number) {
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
+function isMobileDevice() {
+  return window.matchMedia('(max-width: 700px)').matches
+    || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent))
+}
+
 function App() {
+  const [isMobile, setIsMobile] = useState(isMobileDevice)
   const [mode, setMode] = useState<TimerMode>('pomodoro')
   const [durations, setDurations] = useState(defaultDurations)
   const [remaining, setRemaining] = useState(defaultDurations.pomodoro * 60)
   const [isRunning, setIsRunning] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState(false)
+  const [isMiniPlayerImageReady, setIsMiniPlayerImageReady] = useState(false)
+  const [isMiniPlayerVideoReady, setIsMiniPlayerVideoReady] = useState(false)
+  const [miniPlayerError, setMiniPlayerError] = useState('')
   const [draftDurations, setDraftDurations] = useState(defaultDurations)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [stream, setStream] = useState<Stream>('lofi')
@@ -300,6 +311,9 @@ function App() {
   const [isPlayerReady, setIsPlayerReady] = useState(false)
   const [playerError, setPlayerError] = useState('')
   const playerHostRef = useRef<HTMLDivElement>(null)
+  const miniPlayerVideoRef = useRef<HTMLVideoElement>(null)
+  const miniPlayerCanvasRef = useRef<HTMLCanvasElement>(null)
+  const miniPlayerImageRef = useRef<HTMLImageElement>(null)
   const playerRef = useRef<YouTubePlayer | null>(null)
   const volumeRef = useRef(volume)
   const [restoredGame] = useState(readSavedGame)
@@ -333,6 +347,12 @@ function App() {
   }, [isRunning])
 
   useEffect(() => {
+    const updateMobileState = () => setIsMobile(isMobileDevice())
+    window.addEventListener('resize', updateMobileState)
+    return () => window.removeEventListener('resize', updateMobileState)
+  }, [])
+
+  useEffect(() => {
     const syncFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement))
     document.addEventListener('fullscreenchange', syncFullscreen)
     return () => document.removeEventListener('fullscreenchange', syncFullscreen)
@@ -341,6 +361,64 @@ function App() {
   useEffect(() => {
     volumeRef.current = volume
   }, [volume])
+
+  useEffect(() => {
+    const image = new Image()
+    image.onload = () => {
+      miniPlayerImageRef.current = image
+      setIsMiniPlayerImageReady(true)
+      setMiniPlayerError('')
+    }
+    image.onerror = () => setMiniPlayerError('Could not load the mini-player background image.')
+    image.src = `${import.meta.env.BASE_URL}mini-player-background.png`
+
+    const video = miniPlayerVideoRef.current
+    const leavePictureInPicture = () => setIsMiniPlayerOpen(false)
+    const loadPictureInPictureVideo = () => setIsMiniPlayerVideoReady(true)
+    video?.addEventListener('leavepictureinpicture', leavePictureInPicture)
+    video?.addEventListener('loadedmetadata', loadPictureInPictureVideo)
+
+    return () => {
+      video?.removeEventListener('leavepictureinpicture', leavePictureInPicture)
+      video?.removeEventListener('loadedmetadata', loadPictureInPictureVideo)
+      const stream = video?.srcObject
+      if (stream instanceof MediaStream) stream.getTracks().forEach((track) => track.stop())
+      if (video) video.srcObject = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const canvas = miniPlayerCanvasRef.current
+    const context = canvas?.getContext('2d')
+    const image = miniPlayerImageRef.current
+    if (!canvas || !context || !image) return
+
+    const scale = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight)
+    const width = image.naturalWidth * scale
+    const height = image.naturalHeight * scale
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.drawImage(image, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height)
+    context.fillStyle = 'rgba(0, 0, 0, 0.18)'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.font = '600 132px system-ui, sans-serif'
+    context.shadowColor = 'rgba(0, 0, 0, 0.7)'
+    context.shadowBlur = 24
+    context.fillStyle = '#fff'
+    context.fillText(formatTime(remaining), canvas.width / 2, canvas.height / 2)
+  }, [isMiniPlayerImageReady, remaining])
+
+  useEffect(() => {
+    const canvas = miniPlayerCanvasRef.current
+    const video = miniPlayerVideoRef.current
+    if (!isMiniPlayerImageReady || !canvas?.captureStream || !video || video.srcObject) return
+
+    video.srcObject = canvas.captureStream(1)
+    video.play().catch((error: unknown) => {
+      setMiniPlayerError(error instanceof Error ? `Could not prepare mini-player video: ${error.message}` : 'Could not prepare mini-player video.')
+    })
+  }, [isMiniPlayerImageReady])
 
   useEffect(() => {
     let active = true
@@ -417,7 +495,9 @@ function App() {
     if (!isMenuOpen) return
 
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsMenuOpen(false)
+      if (event.key === 'Escape') {
+        setIsMenuOpen(false)
+      }
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
@@ -439,6 +519,35 @@ function App() {
       await document.exitFullscreen()
     } else {
       await document.documentElement.requestFullscreen()
+    }
+  }
+
+  const openMiniPlayer = async () => {
+    if (isMobile) return
+    const video = miniPlayerVideoRef.current
+    const canvas = miniPlayerCanvasRef.current
+    const image = miniPlayerImageRef.current
+
+    try {
+      if (!video || !canvas || !image) {
+        setMiniPlayerError('The mini-player is still loading. Please try again shortly.')
+        return
+      }
+      if (!canvas.captureStream || !video.requestPictureInPicture) {
+        setMiniPlayerError('Video Picture-in-Picture is not supported in this browser.')
+        return
+      }
+      if (!isMiniPlayerVideoReady) {
+        setMiniPlayerError('The mini-player video is still preparing. Please try again shortly.')
+        return
+      }
+
+      const pictureInPicturePromise = video.requestPictureInPicture()
+      await pictureInPicturePromise
+      setIsMiniPlayerOpen(true)
+      setMiniPlayerError('')
+    } catch (error) {
+      setMiniPlayerError(error instanceof Error ? `Could not open video Picture-in-Picture: ${error.message}` : 'Could not open video Picture-in-Picture.')
     }
   }
 
@@ -588,10 +697,27 @@ function App() {
   }
 
   return (
+    <>
     <main className="app-shell">
       <div className="stream-background" aria-hidden="true">
         <div ref={playerHostRef} className="stream-player" />
       </div>
+      <canvas
+        ref={miniPlayerCanvasRef}
+        className="mini-player-canvas"
+        width="1280"
+        height="720"
+        aria-hidden="true"
+      />
+      <video
+        ref={miniPlayerVideoRef}
+        className="mini-player-video"
+        width="1280"
+        height="720"
+        muted
+        playsInline
+        aria-hidden="true"
+      />
       <header className="brand" aria-label="Study lah">
         <span className="brand-script">study lah.</span>
         <span className="brand-byline">YES this vibecoded</span>
@@ -846,6 +972,22 @@ function App() {
       </div>
 
       <div className="bottom-actions">
+        {!isMobile && (
+          <button
+            className="mini-player-button"
+            type="button"
+            aria-label="Open always-on-top mini-player"
+            title={isMiniPlayerOpen ? 'Mini-player is open' : 'Open video Picture-in-Picture'}
+            disabled={isMiniPlayerOpen || !isMiniPlayerVideoReady}
+            onClick={openMiniPlayer}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path d="M11 11h8v6h-8z" />
+            </svg>
+          </button>
+        )}
+        {miniPlayerError && <span className="mini-player-error" role="status">{miniPlayerError}</span>}
         <button className="focus-button" type="button" onClick={toggleFullscreen}>
           <span aria-hidden="true">✨</span>
           {isFullscreen ? 'Exit focus' : 'Go to Focus'}
@@ -896,6 +1038,7 @@ function App() {
         </div>
       )}
     </main>
+    </>
   )
 }
 
