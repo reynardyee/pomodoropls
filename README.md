@@ -41,4 +41,6 @@ The always-on-top mini-player renders its image and timer to a canvas-backed vid
 
 ## Coffee rewards and timer sounds
 
-The timer awards 100 coffees for every 30 minutes of active Pomodoro focus time. Coffee balance and partial progress toward the next reward are saved in the current browser. Timer settings include three synthesized ringtone options and an adjustable alarm volume, with a preview button.
+The timer awards 100 coffee beans for every 30 minutes of active Pomodoro focus time. The coffee-bean balance and partial progress toward the next reward are saved in the current browser. Timer settings include three synthesized ringtone options and an adjustable alarm volume, with a preview button.
+
+The editable study-status badge appears above the timer and saves its label and color in the current browser. At the end of a completed Pomodoro, add a reflection to save the session. Open **Completed study sessions** in the background menu to review each session's date, time, focus duration, status, and reflection; this history is stored in the current browser.

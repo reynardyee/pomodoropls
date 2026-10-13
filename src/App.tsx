@@ -6,6 +6,7 @@ type Durations = Record<TimerMode, number>
 type Stream = 'lofi' | 'rainy-lofi'
 type Difficulty = 'easy' | 'medium' | 'hard'
 type Ringtone = 'soft-chime' | 'classic-bell' | 'digital-pulse'
+type BadgeColor = 'blue' | 'violet' | 'green' | 'amber' | 'rose'
 type SudokuPuzzle = { clues: number[]; solution: number[] }
 type PomodoroPreferences = {
   coffees: number
@@ -13,6 +14,15 @@ type PomodoroPreferences = {
   ringtone: Ringtone
   ringtoneVolume: number
 }
+type CompletedStudySession = {
+  id: string
+  completedAt: string
+  durationSeconds: number
+  status: string
+  statusColor: BadgeColor
+  reflection: string
+}
+type PendingStudySession = Omit<CompletedStudySession, 'reflection'>
 type GameSnapshot = {
   difficulty: Difficulty
   puzzleIndex: number
@@ -163,6 +173,8 @@ function emptyNotes() {
 
 const gameStorageKey = 'study-with-me-sudoku'
 const preferencesStorageKey = 'study-with-me-pomodoro-preferences'
+const studyStatusStorageKey = 'study-with-me-study-status'
+const studySessionsStorageKey = 'study-with-me-completed-sessions'
 const rewardIntervalSeconds = 30 * 60
 const coffeeReward = 100
 const ringtoneOptions: { value: Ringtone; label: string }[] = [
@@ -170,7 +182,68 @@ const ringtoneOptions: { value: Ringtone; label: string }[] = [
   { value: 'classic-bell', label: 'Classic bell' },
   { value: 'digital-pulse', label: 'Digital pulse' },
 ]
+const badgeColors: { value: BadgeColor; label: string }[] = [
+  { value: 'blue', label: 'Blue' },
+  { value: 'violet', label: 'Violet' },
+  { value: 'green', label: 'Green' },
+  { value: 'amber', label: 'Amber' },
+  { value: 'rose', label: 'Rose' },
+]
+const defaultStudyStatus = { text: '', color: 'blue' as BadgeColor }
 let youtubeApiPromise: Promise<void> | undefined
+
+function isBadgeColor(value: unknown): value is BadgeColor {
+  return badgeColors.some((color) => color.value === value)
+}
+
+function readStudyStatus(): { text: string; color: BadgeColor; error: string } {
+  try {
+    const saved = localStorage.getItem(studyStatusStorageKey)
+    if (!saved) return { ...defaultStudyStatus, error: '' }
+    const parsed: unknown = JSON.parse(saved)
+    if (
+      typeof parsed !== 'object'
+      || parsed === null
+      || !('text' in parsed)
+      || typeof parsed.text !== 'string'
+      || parsed.text.length > 60
+      || !('color' in parsed)
+      || !isBadgeColor(parsed.color)
+    ) {
+      return { ...defaultStudyStatus, error: 'Saved study status was invalid; a blank status was loaded.' }
+    }
+    return { text: parsed.text, color: parsed.color, error: '' }
+  } catch {
+    return { ...defaultStudyStatus, error: 'Could not load your study status from this browser.' }
+  }
+}
+
+function isCompletedStudySession(value: unknown): value is CompletedStudySession {
+  if (typeof value !== 'object' || value === null) return false
+  if (
+    !('id' in value) || typeof value.id !== 'string'
+    || !('completedAt' in value) || typeof value.completedAt !== 'string' || Number.isNaN(Date.parse(value.completedAt))
+    || !('durationSeconds' in value) || typeof value.durationSeconds !== 'number' || !Number.isInteger(value.durationSeconds) || value.durationSeconds <= 0
+    || !('status' in value) || typeof value.status !== 'string' || value.status.length > 60
+    || !('statusColor' in value) || !isBadgeColor(value.statusColor)
+    || !('reflection' in value) || typeof value.reflection !== 'string' || value.reflection.length > 1000
+  ) return false
+  return true
+}
+
+function readCompletedStudySessions(): { sessions: CompletedStudySession[]; error: string } {
+  try {
+    const saved = localStorage.getItem(studySessionsStorageKey)
+    if (!saved) return { sessions: [], error: '' }
+    const parsed: unknown = JSON.parse(saved)
+    if (!Array.isArray(parsed) || !parsed.every(isCompletedStudySession)) {
+      return { sessions: [], error: 'Saved study history was invalid; history was cleared.' }
+    }
+    return { sessions: parsed, error: '' }
+  } catch {
+    return { sessions: [], error: 'Could not load completed study sessions from this browser.' }
+  }
+}
 
 const defaultPomodoroPreferences: PomodoroPreferences = {
   coffees: 0,
@@ -391,6 +464,8 @@ function isMobileDevice() {
 function App() {
   const [isMobile, setIsMobile] = useState(isMobileDevice)
   const [restoredPreferences] = useState(readPomodoroPreferences)
+  const [restoredStudyStatus] = useState(readStudyStatus)
+  const [restoredStudySessions] = useState(readCompletedStudySessions)
   const [mode, setMode] = useState<TimerMode>('pomodoro')
   const [durations, setDurations] = useState(defaultDurations)
   const [remaining, setRemaining] = useState(defaultDurations.pomodoro * 60)
@@ -400,6 +475,18 @@ function App() {
   const [ringtone, setRingtone] = useState<Ringtone>(restoredPreferences.preferences.ringtone)
   const [ringtoneVolume, setRingtoneVolume] = useState(restoredPreferences.preferences.ringtoneVolume)
   const [settingsError, setSettingsError] = useState(restoredPreferences.error)
+  const [studyStatus, setStudyStatus] = useState(restoredStudyStatus.text)
+  const [studyStatusColor, setStudyStatusColor] = useState<BadgeColor>(restoredStudyStatus.color)
+  const [studyStatusDraft, setStudyStatusDraft] = useState(restoredStudyStatus.text)
+  const [studyStatusColorDraft, setStudyStatusColorDraft] = useState<BadgeColor>(restoredStudyStatus.color)
+  const [isEditingStudyStatus, setIsEditingStudyStatus] = useState(false)
+  const [studyStatusError, setStudyStatusError] = useState(restoredStudyStatus.error)
+  const [completedSessions, setCompletedSessions] = useState(restoredStudySessions.sessions)
+  const [studyHistoryError, setStudyHistoryError] = useState(restoredStudySessions.error)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  const [pendingStudySession, setPendingStudySession] = useState<PendingStudySession | null>(null)
+  const [sessionReflection, setSessionReflection] = useState('')
+  const [sessionSaveError, setSessionSaveError] = useState('')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState(false)
   const [isMiniPlayerImageReady, setIsMiniPlayerImageReady] = useState(false)
@@ -422,6 +509,7 @@ function App() {
   const remainingRef = useRef(remaining)
   const coffeesRef = useRef(coffees)
   const focusSecondsRef = useRef(focusSeconds)
+  const focusSessionElapsedRef = useRef(0)
   const playerRef = useRef<YouTubePlayer | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const volumeRef = useRef(volume)
@@ -450,6 +538,7 @@ function App() {
       let nextFocusSeconds = focusSecondsRef.current
       let nextCoffees = coffeesRef.current
       if (mode === 'pomodoro') {
+        focusSessionElapsedRef.current += 1
         nextFocusSeconds += 1
         if (nextFocusSeconds >= rewardIntervalSeconds) {
           nextFocusSeconds -= rewardIntervalSeconds
@@ -470,6 +559,18 @@ function App() {
 
       if (nextRemaining === 0) {
         setIsRunning(false)
+        if (mode === 'pomodoro') {
+          setPendingStudySession({
+            id: crypto.randomUUID(),
+            completedAt: new Date().toISOString(),
+            durationSeconds: focusSessionElapsedRef.current,
+            status: studyStatus,
+            statusColor: studyStatusColor,
+          })
+          setSessionReflection('')
+          setSessionSaveError('')
+          focusSessionElapsedRef.current = 0
+        }
         const context = audioContextRef.current
         if (context) {
           context.resume()
@@ -484,7 +585,7 @@ function App() {
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [isRunning, mode, ringtone, ringtoneVolume])
+  }, [isRunning, mode, ringtone, ringtoneVolume, studyStatus, studyStatusColor])
 
   useEffect(() => {
     const updateMobileState = () => setIsMobile(isMobileDevice())
@@ -632,19 +733,21 @@ function App() {
   }
 
   useEffect(() => {
-    if (!isMenuOpen) return
+    if (!isMenuOpen && !isHistoryOpen) return
 
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !pendingStudySession) {
         setIsMenuOpen(false)
+        setIsHistoryOpen(false)
       }
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
-  }, [isMenuOpen])
+  }, [isHistoryOpen, isMenuOpen, pendingStudySession])
 
   const selectMode = (nextMode: TimerMode) => {
     setMode(nextMode)
+    focusSessionElapsedRef.current = 0
     const nextRemaining = durations[nextMode] * 60
     remainingRef.current = nextRemaining
     setRemaining(nextRemaining)
@@ -653,6 +756,7 @@ function App() {
 
   const resetTimer = () => {
     const nextRemaining = durations[mode] * 60
+    focusSessionElapsedRef.current = 0
     remainingRef.current = nextRemaining
     setRemaining(nextRemaining)
     setIsRunning(false)
@@ -676,6 +780,7 @@ function App() {
       })
       if (remainingRef.current === 0) {
         const nextRemaining = durations[mode] * 60
+        focusSessionElapsedRef.current = 0
         remainingRef.current = nextRemaining
         setRemaining(nextRemaining)
       }
@@ -742,11 +847,36 @@ function App() {
     setIsSettingsOpen(true)
   }
 
+  const openStudyStatusEditor = () => {
+    setStudyStatusDraft(studyStatus)
+    setStudyStatusColorDraft(studyStatusColor)
+    setStudyStatusError('')
+    setIsEditingStudyStatus(true)
+  }
+
+  const saveStudyStatus = () => {
+    const text = studyStatusDraft.trim()
+    if (text.length > 60) {
+      setStudyStatusError('Study status must be 60 characters or fewer.')
+      return
+    }
+    try {
+      localStorage.setItem(studyStatusStorageKey, JSON.stringify({ text, color: studyStatusColorDraft }))
+      setStudyStatus(text)
+      setStudyStatusColor(studyStatusColorDraft)
+      setStudyStatusError('')
+      setIsEditingStudyStatus(false)
+    } catch {
+      setStudyStatusError('Could not save your study status. Check this browser’s storage settings.')
+    }
+  }
+
   const saveSettings = () => {
     setDurations(draftDurations)
     setRingtone(draftRingtone)
     setRingtoneVolume(draftRingtoneVolume)
     const nextRemaining = draftDurations[mode] * 60
+    focusSessionElapsedRef.current = 0
     remainingRef.current = nextRemaining
     setRemaining(nextRemaining)
     setIsRunning(false)
@@ -757,6 +887,28 @@ function App() {
       ringtoneVolume: draftRingtoneVolume,
     }))
     setIsSettingsOpen(false)
+  }
+
+  const saveCompletedStudySession = () => {
+    if (!pendingStudySession) return
+    const reflection = sessionReflection.trim()
+    if (!reflection) {
+      setSessionSaveError('Add a short note about what you learned or did before saving.')
+      return
+    }
+
+    const session: CompletedStudySession = { ...pendingStudySession, reflection }
+    const nextSessions = [session, ...completedSessions]
+    try {
+      localStorage.setItem(studySessionsStorageKey, JSON.stringify(nextSessions))
+      setCompletedSessions(nextSessions)
+      setStudyHistoryError('')
+      setPendingStudySession(null)
+      setSessionReflection('')
+      setSessionSaveError('')
+    } catch {
+      setSessionSaveError('Could not save this session. Check this browser’s storage settings.')
+    }
   }
 
   const saveCurrentGame = (changes: Partial<GameSnapshot> = {}) => {
@@ -917,15 +1069,16 @@ function App() {
       <header className="brand" aria-label="Study lah">
         <span className="brand-script">study lah.</span>
         <span className="brand-byline">YES this vibecoded</span>
-        <span
-          className="coffee-balance"
-          title={`Earn ${coffeeReward} coffees every 30 minutes of Pomodoro focus. Next reward in ${formatTime(rewardIntervalSeconds - focusSeconds)}.`}
-          aria-label={`${coffees} coffees. ${formatTime(rewardIntervalSeconds - focusSeconds)} of focus time until the next reward.`}
-        >
-          <span aria-hidden="true">☕</span>
-          {coffees} coffees
-        </span>
       </header>
+
+      <div
+        className="coffee-balance"
+        title={`Earn ${coffeeReward} coffee beans every 30 minutes of Pomodoro focus. Next reward in ${formatTime(rewardIntervalSeconds - focusSeconds)}.`}
+        aria-label={`${coffees} coffee beans. ${formatTime(rewardIntervalSeconds - focusSeconds)} of focus time until the next reward.`}
+      >
+        <span aria-hidden="true">🫘</span>
+        {coffees}
+      </div>
 
       <div className="scene-menu">
         <button
@@ -976,6 +1129,20 @@ function App() {
               <a className="streams-link" href="https://www.youtube.com/@LofiGirl/streams" target="_blank" rel="noreferrer">
                 Watch Lofi Girl streams <span aria-hidden="true">↗</span>
               </a>
+              <button
+                className="study-history-link"
+                type="button"
+                onClick={() => {
+                  setIsMenuOpen(false)
+                  setIsHistoryOpen(true)
+                }}
+              >
+                <span>
+                  <span className="menu-eyebrow">YOUR PROGRESS</span>
+                  <strong>Completed study sessions</strong>
+                </span>
+                <span aria-hidden="true">→</span>
+              </button>
               <section className="sudoku-game" aria-labelledby="sudoku-title">
                 <div className="sudoku-heading">
                   <div>
@@ -1105,6 +1272,57 @@ function App() {
               {modeLabels[timerMode]}
             </button>
           ))}
+        </div>
+
+        <div className="study-status">
+          <button
+            className={`study-status-badge color-${studyStatusColor}`}
+            type="button"
+            aria-label={studyStatus ? `Edit study status: ${studyStatus}` : 'Set what you are studying'}
+            aria-expanded={isEditingStudyStatus}
+            onClick={openStudyStatusEditor}
+          >
+            <span className="study-status-icon" aria-hidden="true">✎</span>
+            <span>{studyStatus || 'What are you studying?'}</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.9 2.1 3 3M2.5 13.5l2.8-.6 7.9-7.9a1.4 1.4 0 0 0-2-2l-7.9 7.9-.8 2.6Z" /></svg>
+          </button>
+          {isEditingStudyStatus && (
+            <form
+              className="study-status-editor"
+              aria-label="Edit study status"
+              onSubmit={(event) => {
+                event.preventDefault()
+                saveStudyStatus()
+              }}
+            >
+              <label htmlFor="study-status-input">What are you studying?</label>
+              <input
+                id="study-status-input"
+                autoFocus
+                maxLength={60}
+                placeholder="e.g. Biology chapter 4"
+                value={studyStatusDraft}
+                onChange={(event) => setStudyStatusDraft(event.target.value)}
+              />
+              <div className="study-status-colors" role="group" aria-label="Badge color">
+                {badgeColors.map((color) => (
+                  <button
+                    key={color.value}
+                    className={`status-color-option color-${color.value}`}
+                    type="button"
+                    aria-label={`${color.label} badge color`}
+                    aria-pressed={studyStatusColorDraft === color.value}
+                    onClick={() => setStudyStatusColorDraft(color.value)}
+                  />
+                ))}
+              </div>
+              {studyStatusError && <span className="study-status-error" role="status">{studyStatusError}</span>}
+              <div className="study-status-actions">
+                <button type="button" onClick={() => setIsEditingStudyStatus(false)}>Cancel</button>
+                <button type="submit">Save status</button>
+              </div>
+            </form>
+          )}
         </div>
 
         <div className="time-display" aria-live="off" aria-label={`${formatTime(remaining)} remaining`}>
@@ -1269,7 +1487,85 @@ function App() {
           </section>
         </div>
       )}
+      {pendingStudySession && (
+        <div className="modal-backdrop session-modal-backdrop">
+          <form
+            className="session-completion-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-completion-title"
+            onSubmit={(event) => {
+              event.preventDefault()
+              saveCompletedStudySession()
+            }}
+          >
+            <span className="dialog-kicker">FOCUS SESSION COMPLETE</span>
+            <h1 id="session-completion-title">Nice work!</h1>
+            <div className={`session-status color-${pendingStudySession.statusColor}`}>
+              <span>Studying</span>
+              <strong>{pendingStudySession.status || 'No study status set'}</strong>
+            </div>
+            <p className="session-duration">Focused for {formatTime(pendingStudySession.durationSeconds)}</p>
+            <label htmlFor="session-reflection">What did you learn or do?</label>
+            <textarea
+              id="session-reflection"
+              autoFocus
+              maxLength={1000}
+              required
+              placeholder="Write a note about this session..."
+              value={sessionReflection}
+              onChange={(event) => setSessionReflection(event.target.value)}
+            />
+            {sessionSaveError && <p className="session-save-error" role="alert">{sessionSaveError}</p>}
+            <button className="save-button" type="submit">Save completed session</button>
+          </form>
+        </div>
+      )}
     </main>
+    {isHistoryOpen && (
+      <div className="study-history-page">
+        <section className="study-history-content" aria-labelledby="study-history-title">
+          <button className="history-back-button" type="button" onClick={() => setIsHistoryOpen(false)}>
+            <span aria-hidden="true">←</span> Back to timer
+          </button>
+          <span className="dialog-kicker">YOUR PROGRESS</span>
+          <h1 id="study-history-title">Completed study sessions</h1>
+          <p className="study-history-intro">Your saved Pomodoro sessions, with the notes you added.</p>
+          {studyHistoryError && <p className="study-history-error" role="status">{studyHistoryError}</p>}
+          {completedSessions.length === 0 ? (
+            <div className="study-history-empty">
+              <span aria-hidden="true">☕</span>
+              <h2>No completed sessions yet</h2>
+              <p>Finish a Pomodoro and save a note to see it here.</p>
+            </div>
+          ) : (
+            <div className="study-session-list">
+              {completedSessions.map((session) => (
+                <article className="study-session-card" key={session.id}>
+                  <header>
+                    <time dateTime={session.completedAt}>
+                      {new Date(session.completedAt).toLocaleString(undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </time>
+                    <span>{formatTime(session.durationSeconds)} focused</span>
+                  </header>
+                  <div className={`session-status history-session-status color-${session.statusColor}`}>
+                    <span>Studying</span>
+                    <strong>{session.status || 'No study status set'}</strong>
+                  </div>
+                  <div className="study-session-reflection">
+                    <span>What I learned / did</span>
+                    <p>{session.reflection}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    )}
     </>
   )
 }
