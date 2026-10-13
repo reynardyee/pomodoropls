@@ -38,3 +38,7 @@ In the repository settings, set **Pages → Build and deployment → Source** to
 The Vite base path is configured for this repository's project site at `/pomodoropls/`.
 
 The always-on-top mini-player renders its image and timer to a canvas-backed video and uses the browser's native video Picture-in-Picture API. It is available on desktop in browsers that support video Picture-in-Picture, and intentionally hidden on mobile.
+
+## Coffee rewards and timer sounds
+
+The timer awards 100 coffees for every 30 minutes of active Pomodoro focus time. Coffee balance and partial progress toward the next reward are saved in the current browser. Timer settings include three synthesized ringtone options and an adjustable alarm volume, with a preview button.

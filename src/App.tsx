@@ -5,7 +5,14 @@ type TimerMode = 'pomodoro' | 'short' | 'long'
 type Durations = Record<TimerMode, number>
 type Stream = 'lofi' | 'rainy-lofi'
 type Difficulty = 'easy' | 'medium' | 'hard'
+type Ringtone = 'soft-chime' | 'classic-bell' | 'digital-pulse'
 type SudokuPuzzle = { clues: number[]; solution: number[] }
+type PomodoroPreferences = {
+  coffees: number
+  focusSeconds: number
+  ringtone: Ringtone
+  ringtoneVolume: number
+}
 type GameSnapshot = {
   difficulty: Difficulty
   puzzleIndex: number
@@ -155,7 +162,97 @@ function emptyNotes() {
 }
 
 const gameStorageKey = 'study-with-me-sudoku'
+const preferencesStorageKey = 'study-with-me-pomodoro-preferences'
+const rewardIntervalSeconds = 30 * 60
+const coffeeReward = 100
+const ringtoneOptions: { value: Ringtone; label: string }[] = [
+  { value: 'soft-chime', label: 'Soft chime' },
+  { value: 'classic-bell', label: 'Classic bell' },
+  { value: 'digital-pulse', label: 'Digital pulse' },
+]
 let youtubeApiPromise: Promise<void> | undefined
+
+const defaultPomodoroPreferences: PomodoroPreferences = {
+  coffees: 0,
+  focusSeconds: 0,
+  ringtone: 'soft-chime',
+  ringtoneVolume: 60,
+}
+
+function isRingtone(value: unknown): value is Ringtone {
+  return ringtoneOptions.some((option) => option.value === value)
+}
+
+function readPomodoroPreferences(): { preferences: PomodoroPreferences; error: string } {
+  try {
+    const saved = localStorage.getItem(preferencesStorageKey)
+    if (!saved) return { preferences: defaultPomodoroPreferences, error: '' }
+
+    const parsed: unknown = JSON.parse(saved)
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { preferences: defaultPomodoroPreferences, error: 'Saved timer preferences were invalid; defaults were loaded.' }
+    }
+
+    const values = parsed as Record<string, unknown>
+    const valid = typeof values.coffees === 'number'
+      && Number.isSafeInteger(values.coffees)
+      && values.coffees >= 0
+      && typeof values.focusSeconds === 'number'
+      && Number.isInteger(values.focusSeconds)
+      && values.focusSeconds >= 0
+      && values.focusSeconds < rewardIntervalSeconds
+      && isRingtone(values.ringtone)
+      && typeof values.ringtoneVolume === 'number'
+      && Number.isInteger(values.ringtoneVolume)
+      && values.ringtoneVolume >= 0
+      && values.ringtoneVolume <= 100
+
+    if (!valid) {
+      return { preferences: defaultPomodoroPreferences, error: 'Saved timer preferences were invalid; defaults were loaded.' }
+    }
+
+    return { preferences: values as PomodoroPreferences, error: '' }
+  } catch {
+    return { preferences: defaultPomodoroPreferences, error: 'Could not load timer preferences from this browser.' }
+  }
+}
+
+function savePomodoroPreferences(preferences: PomodoroPreferences) {
+  try {
+    localStorage.setItem(preferencesStorageKey, JSON.stringify(preferences))
+    return ''
+  } catch {
+    return 'Could not save coffee balance and timer settings to this browser.'
+  }
+}
+
+function playRingtone(context: AudioContext, ringtone: Ringtone, volume: number) {
+  const sounds: Record<Ringtone, { notes: number[]; type: OscillatorType; noteLength: number; gap: number }> = {
+    'soft-chime': { notes: [659.25, 783.99, 987.77, 783.99], type: 'sine', noteLength: 0.34, gap: 0.12 },
+    'classic-bell': { notes: [880, 0, 698.46, 0, 880, 0, 1046.5], type: 'triangle', noteLength: 0.24, gap: 0.12 },
+    'digital-pulse': { notes: [880, 0, 880, 0, 1174.66, 0, 880], type: 'square', noteLength: 0.14, gap: 0.1 },
+  }
+  const sound = sounds[ringtone]
+  const startAt = context.currentTime + 0.02
+  const level = Math.min(1, Math.max(0, volume / 100)) * 0.2
+
+  sound.notes.forEach((frequency, index) => {
+    if (frequency === 0) return
+    const start = startAt + index * (sound.noteLength + sound.gap)
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = sound.type
+    oscillator.frequency.setValueAtTime(frequency, start)
+    gain.gain.setValueAtTime(0, start)
+    gain.gain.linearRampToValueAtTime(level, start + 0.02)
+    gain.gain.setValueAtTime(level, start + sound.noteLength * 0.65)
+    gain.gain.linearRampToValueAtTime(0, start + sound.noteLength)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start(start)
+    oscillator.stop(start + sound.noteLength)
+  })
+}
 
 function loadYouTubeApi() {
   if (window.YT?.Player) return Promise.resolve()
@@ -293,16 +390,24 @@ function isMobileDevice() {
 
 function App() {
   const [isMobile, setIsMobile] = useState(isMobileDevice)
+  const [restoredPreferences] = useState(readPomodoroPreferences)
   const [mode, setMode] = useState<TimerMode>('pomodoro')
   const [durations, setDurations] = useState(defaultDurations)
   const [remaining, setRemaining] = useState(defaultDurations.pomodoro * 60)
   const [isRunning, setIsRunning] = useState(false)
+  const [coffees, setCoffees] = useState(restoredPreferences.preferences.coffees)
+  const [focusSeconds, setFocusSeconds] = useState(restoredPreferences.preferences.focusSeconds)
+  const [ringtone, setRingtone] = useState<Ringtone>(restoredPreferences.preferences.ringtone)
+  const [ringtoneVolume, setRingtoneVolume] = useState(restoredPreferences.preferences.ringtoneVolume)
+  const [settingsError, setSettingsError] = useState(restoredPreferences.error)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState(false)
   const [isMiniPlayerImageReady, setIsMiniPlayerImageReady] = useState(false)
   const [isMiniPlayerVideoReady, setIsMiniPlayerVideoReady] = useState(false)
   const [miniPlayerError, setMiniPlayerError] = useState('')
   const [draftDurations, setDraftDurations] = useState(defaultDurations)
+  const [draftRingtone, setDraftRingtone] = useState<Ringtone>(restoredPreferences.preferences.ringtone)
+  const [draftRingtoneVolume, setDraftRingtoneVolume] = useState(restoredPreferences.preferences.ringtoneVolume)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [stream, setStream] = useState<Stream>('lofi')
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -314,7 +419,11 @@ function App() {
   const miniPlayerVideoRef = useRef<HTMLVideoElement>(null)
   const miniPlayerCanvasRef = useRef<HTMLCanvasElement>(null)
   const miniPlayerImageRef = useRef<HTMLImageElement>(null)
+  const remainingRef = useRef(remaining)
+  const coffeesRef = useRef(coffees)
+  const focusSecondsRef = useRef(focusSeconds)
   const playerRef = useRef<YouTubePlayer | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
   const volumeRef = useRef(volume)
   const [restoredGame] = useState(readSavedGame)
   const [difficulty, setDifficulty] = useState(restoredGame.game.difficulty)
@@ -334,17 +443,48 @@ function App() {
     if (!isRunning) return
 
     const timer = window.setInterval(() => {
-      setRemaining((current) => {
-        if (current <= 1) {
-          setIsRunning(false)
-          return 0
+      const nextRemaining = Math.max(0, remainingRef.current - 1)
+      remainingRef.current = nextRemaining
+      setRemaining(nextRemaining)
+
+      let nextFocusSeconds = focusSecondsRef.current
+      let nextCoffees = coffeesRef.current
+      if (mode === 'pomodoro') {
+        nextFocusSeconds += 1
+        if (nextFocusSeconds >= rewardIntervalSeconds) {
+          nextFocusSeconds -= rewardIntervalSeconds
+          nextCoffees += coffeeReward
+          coffeesRef.current = nextCoffees
+          setCoffees(nextCoffees)
         }
-        return current - 1
-      })
+        focusSecondsRef.current = nextFocusSeconds
+        setFocusSeconds(nextFocusSeconds)
+        const storageError = savePomodoroPreferences({
+          coffees: nextCoffees,
+          focusSeconds: nextFocusSeconds,
+          ringtone,
+          ringtoneVolume,
+        })
+        if (storageError) setSettingsError(storageError)
+      }
+
+      if (nextRemaining === 0) {
+        setIsRunning(false)
+        const context = audioContextRef.current
+        if (context) {
+          context.resume()
+            .then(() => playRingtone(context, ringtone, ringtoneVolume))
+            .catch((error: unknown) => {
+              setSettingsError(error instanceof Error ? `Could not play timer ringtone: ${error.message}` : 'Could not play timer ringtone.')
+            })
+        } else {
+          setSettingsError('Start the timer once before it ends to enable its ringtone.')
+        }
+      }
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [isRunning])
+  }, [isRunning, mode, ringtone, ringtoneVolume])
 
   useEffect(() => {
     const updateMobileState = () => setIsMobile(isMobileDevice())
@@ -505,13 +645,57 @@ function App() {
 
   const selectMode = (nextMode: TimerMode) => {
     setMode(nextMode)
-    setRemaining(durations[nextMode] * 60)
+    const nextRemaining = durations[nextMode] * 60
+    remainingRef.current = nextRemaining
+    setRemaining(nextRemaining)
     setIsRunning(false)
   }
 
   const resetTimer = () => {
-    setRemaining(durations[mode] * 60)
+    const nextRemaining = durations[mode] * 60
+    remainingRef.current = nextRemaining
+    setRemaining(nextRemaining)
     setIsRunning(false)
+  }
+
+  const getAudioContext = () => {
+    if (!audioContextRef.current) audioContextRef.current = new AudioContext()
+    return audioContextRef.current
+  }
+
+  const startTimer = () => {
+    if (isRunning) {
+      setIsRunning(false)
+      return
+    }
+
+    try {
+      const context = getAudioContext()
+      context.resume().catch((error: unknown) => {
+        setSettingsError(error instanceof Error ? `Could not enable timer audio: ${error.message}` : 'Could not enable timer audio.')
+      })
+      if (remainingRef.current === 0) {
+        const nextRemaining = durations[mode] * 60
+        remainingRef.current = nextRemaining
+        setRemaining(nextRemaining)
+      }
+      setIsRunning(true)
+    } catch (error) {
+      setSettingsError(error instanceof Error ? `Could not enable timer audio: ${error.message}` : 'Could not enable timer audio.')
+    }
+  }
+
+  const previewRingtone = () => {
+    try {
+      const context = getAudioContext()
+      context.resume()
+        .then(() => playRingtone(context, draftRingtone, draftRingtoneVolume))
+        .catch((error: unknown) => {
+          setSettingsError(error instanceof Error ? `Could not preview timer ringtone: ${error.message}` : 'Could not preview timer ringtone.')
+        })
+    } catch (error) {
+      setSettingsError(error instanceof Error ? `Could not preview timer ringtone: ${error.message}` : 'Could not preview timer ringtone.')
+    }
   }
 
   const toggleFullscreen = async () => {
@@ -553,13 +737,25 @@ function App() {
 
   const openSettings = () => {
     setDraftDurations(durations)
+    setDraftRingtone(ringtone)
+    setDraftRingtoneVolume(ringtoneVolume)
     setIsSettingsOpen(true)
   }
 
   const saveSettings = () => {
     setDurations(draftDurations)
-    setRemaining(draftDurations[mode] * 60)
+    setRingtone(draftRingtone)
+    setRingtoneVolume(draftRingtoneVolume)
+    const nextRemaining = draftDurations[mode] * 60
+    remainingRef.current = nextRemaining
+    setRemaining(nextRemaining)
     setIsRunning(false)
+    setSettingsError(savePomodoroPreferences({
+      coffees,
+      focusSeconds,
+      ringtone: draftRingtone,
+      ringtoneVolume: draftRingtoneVolume,
+    }))
     setIsSettingsOpen(false)
   }
 
@@ -721,6 +917,14 @@ function App() {
       <header className="brand" aria-label="Study lah">
         <span className="brand-script">study lah.</span>
         <span className="brand-byline">YES this vibecoded</span>
+        <span
+          className="coffee-balance"
+          title={`Earn ${coffeeReward} coffees every 30 minutes of Pomodoro focus. Next reward in ${formatTime(rewardIntervalSeconds - focusSeconds)}.`}
+          aria-label={`${coffees} coffees. ${formatTime(rewardIntervalSeconds - focusSeconds)} of focus time until the next reward.`}
+        >
+          <span aria-hidden="true">☕</span>
+          {coffees} coffees
+        </span>
       </header>
 
       <div className="scene-menu">
@@ -911,10 +1115,7 @@ function App() {
           <button
             className="start-button"
             type="button"
-            onClick={() => {
-              if (remaining === 0) setRemaining(durations[mode] * 60)
-              setIsRunning((running) => !running)
-            }}
+            onClick={startTimer}
           >
             {isRunning ? 'pause' : 'start'}
           </button>
@@ -1026,6 +1227,37 @@ function App() {
                 </label>
               ))}
             </div>
+            <div className="sound-settings">
+              <label className="sound-select-label" htmlFor="timer-ringtone">
+                <span>Timer ringtone</span>
+                <select
+                  id="timer-ringtone"
+                  value={draftRingtone}
+                  onChange={(event) => {
+                    if (isRingtone(event.target.value)) setDraftRingtone(event.target.value)
+                  }}
+                >
+                  {ringtoneOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="sound-volume-label" htmlFor="timer-ringtone-volume">
+                <span>Ringtone volume <output>{draftRingtoneVolume}%</output></span>
+                <input
+                  id="timer-ringtone-volume"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={draftRingtoneVolume}
+                  onChange={(event) => setDraftRingtoneVolume(Number(event.target.value))}
+                />
+              </label>
+              <button className="preview-ringtone-button" type="button" onClick={previewRingtone}>
+                Preview ringtone
+              </button>
+            </div>
+            {settingsError && <p className="settings-error" role="status">{settingsError}</p>}
             <button
               className="save-button"
               type="button"
