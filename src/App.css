@@ -1177,29 +1177,6 @@
   cursor: pointer;
 }
 
-.focus-button {
-  display: flex;
-  min-height: 55px;
-  align-items: center;
-  gap: 10px;
-  padding: 0 24px;
-  border: 0;
-  border-radius: 13px;
-  color: #fff;
-  background: #6931ed;
-  box-shadow: 0 8px 28px rgba(28, 12, 99, 0.25);
-  font: inherit;
-  font-size: 19px;
-  font-weight: 650;
-  cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease;
-}
-
-.focus-button:hover {
-  transform: translateY(-2px);
-  background: #7a43fa;
-}
-
 .fullscreen-button {
   width: 42px;
   height: 42px;
@@ -1445,6 +1422,13 @@
   font-size: 13px;
 }
 
+.session-reward {
+  margin: -8px 0 0;
+  color: #f0d99a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .session-completion-dialog > label {
   color: #eeedf8;
   font-size: 13px;
@@ -1480,14 +1464,14 @@
   z-index: 11;
   inset: 0;
   overflow-y: auto;
-  padding: clamp(20px, 5vw, 56px);
+  padding: 52px clamp(20px, 5vw, 56px);
   color: #fff;
   background: rgba(20, 22, 41, 0.96);
   backdrop-filter: blur(18px);
 }
 
 .study-history-content {
-  width: min(100%, 820px);
+  width: min(100%, 680px);
   margin: 0 auto;
 }
 
@@ -1495,7 +1479,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 38px;
+  margin: 0 0 34px;
   padding: 8px 0;
   border: 0;
   color: #e3dbff;
@@ -1510,13 +1494,13 @@
 }
 
 .study-history-content > h1 {
-  margin: 8px 0;
-  font-size: clamp(28px, 5vw, 42px);
+  margin: 8px 0 6px;
+  font-size: clamp(28px, 5vw, 36px);
   letter-spacing: -0.04em;
 }
 
 .study-history-intro {
-  margin: 0 0 26px;
+  margin: 0 0 20px;
   color: #c4c2d1;
   font-size: 14px;
 }
@@ -1553,37 +1537,104 @@
 
 .study-session-list {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+}
+
+.study-session-days {
+  display: grid;
+  gap: 16px;
+}
+
+.study-session-day {
+  display: grid;
+  gap: 10px;
+  padding: 16px 20px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.study-session-day > h2 {
+  margin: 0;
+  color: #c5c9dc;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .study-session-card {
   display: grid;
-  gap: 14px;
-  padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.06);
+  gap: 6px;
+  width: min(100%, 432px);
+  min-height: 86px;
+  box-sizing: border-box;
+  padding: 11px 14px 14px;
+  border: 1px solid var(--badge-border);
+  border-radius: 19px;
+  color: #fff;
+  background: var(--badge-background);
 }
 
-.study-session-card > header {
+.study-session-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.study-session-card-meta > span:first-child {
+  margin-right: auto;
+}
+
+.study-session-card-meta time {
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.study-session-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 34px;
+  justify-content: flex-end;
+}
+
+.study-session-duration svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+}
+
+.study-session-card-content {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: #dedbea;
+  align-items: baseline;
+  gap: 6px 18px;
+  min-width: 0;
+}
+
+.study-session-card-content strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 25px;
+  line-height: 1.2;
+}
+
+.study-session-card-content p {
+  min-width: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.76);
   font-size: 13px;
-}
-
-.study-session-card > header span {
-  color: #c4adff;
-  font-weight: 650;
-}
-
-.history-session-status {
-  width: fit-content;
-  min-width: min(100%, 190px);
-  box-sizing: border-box;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .study-session-reflection {
@@ -1762,14 +1813,6 @@ input:focus-visible {
     width: 54px;
   }
 
-  .focus-button {
-    min-height: 46px;
-    gap: 6px;
-    padding: 0 13px;
-    border-radius: 11px;
-    font-size: 13px;
-  }
-
   .fullscreen-button {
     width: 34px;
     height: 38px;
@@ -1805,10 +1848,6 @@ input:focus-visible {
 
   .volume-slider {
     width: 44px;
-  }
-
-  .focus-button {
-    padding: 0 10px;
   }
 
   .corner-widgets {
@@ -1856,9 +1895,6 @@ input:focus-visible {
     bottom: 12px;
   }
 
-  .focus-button {
-    min-height: 44px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

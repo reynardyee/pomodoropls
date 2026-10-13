@@ -10,7 +10,6 @@ type BadgeColor = 'blue' | 'violet' | 'green' | 'amber' | 'rose'
 type SudokuPuzzle = { clues: number[]; solution: number[] }
 type PomodoroPreferences = {
   coffees: number
-  focusSeconds: number
   ringtone: Ringtone
   ringtoneVolume: number
 }
@@ -175,7 +174,7 @@ const gameStorageKey = 'study-with-me-sudoku'
 const preferencesStorageKey = 'study-with-me-pomodoro-preferences'
 const studyStatusStorageKey = 'study-with-me-study-status'
 const studySessionsStorageKey = 'study-with-me-completed-sessions'
-const rewardIntervalSeconds = 30 * 60
+const minimumRewardFocusSeconds = 25 * 60
 const coffeeReward = 100
 const ringtoneOptions: { value: Ringtone; label: string }[] = [
   { value: 'soft-chime', label: 'Soft chime' },
@@ -245,9 +244,23 @@ function readCompletedStudySessions(): { sessions: CompletedStudySession[]; erro
   }
 }
 
+function groupStudySessionsByDate(sessions: CompletedStudySession[]) {
+  const groups = new Map<string, { date: Date; sessions: CompletedStudySession[] }>()
+  for (const session of sessions) {
+    const completedAt = new Date(session.completedAt)
+    const dateKey = `${completedAt.getFullYear()}-${completedAt.getMonth()}-${completedAt.getDate()}`
+    const group = groups.get(dateKey)
+    if (group) {
+      group.sessions.push(session)
+    } else {
+      groups.set(dateKey, { date: completedAt, sessions: [session] })
+    }
+  }
+  return [...groups.values()]
+}
+
 const defaultPomodoroPreferences: PomodoroPreferences = {
   coffees: 0,
-  focusSeconds: 0,
   ringtone: 'soft-chime',
   ringtoneVolume: 60,
 }
@@ -270,10 +283,6 @@ function readPomodoroPreferences(): { preferences: PomodoroPreferences; error: s
     const valid = typeof values.coffees === 'number'
       && Number.isSafeInteger(values.coffees)
       && values.coffees >= 0
-      && typeof values.focusSeconds === 'number'
-      && Number.isInteger(values.focusSeconds)
-      && values.focusSeconds >= 0
-      && values.focusSeconds < rewardIntervalSeconds
       && isRingtone(values.ringtone)
       && typeof values.ringtoneVolume === 'number'
       && Number.isInteger(values.ringtoneVolume)
@@ -471,7 +480,6 @@ function App() {
   const [remaining, setRemaining] = useState(defaultDurations.pomodoro * 60)
   const [isRunning, setIsRunning] = useState(false)
   const [coffees, setCoffees] = useState(restoredPreferences.preferences.coffees)
-  const [focusSeconds, setFocusSeconds] = useState(restoredPreferences.preferences.focusSeconds)
   const [ringtone, setRingtone] = useState<Ringtone>(restoredPreferences.preferences.ringtone)
   const [ringtoneVolume, setRingtoneVolume] = useState(restoredPreferences.preferences.ringtoneVolume)
   const [settingsError, setSettingsError] = useState(restoredPreferences.error)
@@ -508,7 +516,6 @@ function App() {
   const miniPlayerImageRef = useRef<HTMLImageElement>(null)
   const remainingRef = useRef(remaining)
   const coffeesRef = useRef(coffees)
-  const focusSecondsRef = useRef(focusSeconds)
   const focusSessionElapsedRef = useRef(0)
   const playerRef = useRef<YouTubePlayer | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -535,40 +542,36 @@ function App() {
       remainingRef.current = nextRemaining
       setRemaining(nextRemaining)
 
-      let nextFocusSeconds = focusSecondsRef.current
-      let nextCoffees = coffeesRef.current
       if (mode === 'pomodoro') {
         focusSessionElapsedRef.current += 1
-        nextFocusSeconds += 1
-        if (nextFocusSeconds >= rewardIntervalSeconds) {
-          nextFocusSeconds -= rewardIntervalSeconds
-          nextCoffees += coffeeReward
-          coffeesRef.current = nextCoffees
-          setCoffees(nextCoffees)
-        }
-        focusSecondsRef.current = nextFocusSeconds
-        setFocusSeconds(nextFocusSeconds)
-        const storageError = savePomodoroPreferences({
-          coffees: nextCoffees,
-          focusSeconds: nextFocusSeconds,
-          ringtone,
-          ringtoneVolume,
-        })
-        if (storageError) setSettingsError(storageError)
       }
 
       if (nextRemaining === 0) {
         setIsRunning(false)
         if (mode === 'pomodoro') {
+          const completedFocusSeconds = focusSessionElapsedRef.current
+          const earnedBeans = completedFocusSeconds >= minimumRewardFocusSeconds ? coffeeReward : 0
+          let rewardSaveError = ''
+          if (earnedBeans > 0) {
+            const nextCoffees = coffeesRef.current + earnedBeans
+            const storageError = savePomodoroPreferences({ coffees: nextCoffees, ringtone, ringtoneVolume })
+            if (storageError) {
+              rewardSaveError = storageError
+              setSettingsError(storageError)
+            } else {
+              coffeesRef.current = nextCoffees
+              setCoffees(nextCoffees)
+            }
+          }
           setPendingStudySession({
             id: crypto.randomUUID(),
             completedAt: new Date().toISOString(),
-            durationSeconds: focusSessionElapsedRef.current,
+            durationSeconds: completedFocusSeconds,
             status: studyStatus,
             statusColor: studyStatusColor,
           })
           setSessionReflection('')
-          setSessionSaveError('')
+          setSessionSaveError(rewardSaveError)
           focusSessionElapsedRef.current = 0
         }
         const context = audioContextRef.current
@@ -882,7 +885,6 @@ function App() {
     setIsRunning(false)
     setSettingsError(savePomodoroPreferences({
       coffees,
-      focusSeconds,
       ringtone: draftRingtone,
       ringtoneVolume: draftRingtoneVolume,
     }))
@@ -1073,8 +1075,8 @@ function App() {
 
       <div
         className="coffee-balance"
-        title={`Earn ${coffeeReward} coffee beans every 30 minutes of Pomodoro focus. Next reward in ${formatTime(rewardIntervalSeconds - focusSeconds)}.`}
-        aria-label={`${coffees} coffee beans. ${formatTime(rewardIntervalSeconds - focusSeconds)} of focus time until the next reward.`}
+        title={`Earn ${coffeeReward} coffee beans for each completed Pomodoro of at least 25 minutes. Longer sessions still earn only once. Uncompleted time does not carry over.`}
+        aria-label={`${coffees} coffee beans. Earn ${coffeeReward} for each completed Pomodoro of at least 25 minutes. Longer sessions still earn only once.`}
       >
         <span aria-hidden="true">🫘</span>
         {coffees}
@@ -1407,11 +1409,6 @@ function App() {
           </button>
         )}
         {miniPlayerError && <span className="mini-player-error" role="status">{miniPlayerError}</span>}
-        <button className="focus-button" type="button" onClick={toggleFullscreen}>
-          <span aria-hidden="true">✨</span>
-          {isFullscreen ? 'Exit focus' : 'Go to Focus'}
-          <span aria-hidden="true">→</span>
-        </button>
         <button className="fullscreen-button" type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
           <svg viewBox="0 0 32 32" aria-hidden="true">
             <path d="M4 12V4h8M20 4h8v8M28 20v8h-8M12 28H4v-8" />
@@ -1506,6 +1503,11 @@ function App() {
               <strong>{pendingStudySession.status || 'No study status set'}</strong>
             </div>
             <p className="session-duration">Focused for {formatTime(pendingStudySession.durationSeconds)}</p>
+            <p className="session-reward">
+              {pendingStudySession.durationSeconds >= minimumRewardFocusSeconds
+                ? `You earned ${coffeeReward} coffee beans!`
+                : `Complete a Pomodoro of at least 25 minutes to earn ${coffeeReward} coffee beans. Longer sessions still earn only once.`}
+            </p>
             <label htmlFor="session-reflection">What did you learn or do?</label>
             <textarea
               id="session-reflection"
@@ -1539,27 +1541,49 @@ function App() {
               <p>Finish a Pomodoro and save a note to see it here.</p>
             </div>
           ) : (
-            <div className="study-session-list">
-              {completedSessions.map((session) => (
-                <article className="study-session-card" key={session.id}>
-                  <header>
-                    <time dateTime={session.completedAt}>
-                      {new Date(session.completedAt).toLocaleString(undefined, {
-                        dateStyle: 'medium',
-                        timeStyle: 'short',
-                      })}
-                    </time>
-                    <span>{formatTime(session.durationSeconds)} focused</span>
-                  </header>
-                  <div className={`session-status history-session-status color-${session.statusColor}`}>
-                    <span>Studying</span>
-                    <strong>{session.status || 'No study status set'}</strong>
+            <div className="study-session-days">
+              {groupStudySessionsByDate(completedSessions).map(({ date, sessions }) => (
+                <section className="study-session-day" key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}>
+                  <h2>
+                    {date.toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </h2>
+                  <div className="study-session-list">
+                    {sessions.map((session) => {
+                      const completedAt = new Date(session.completedAt)
+                      const startedAt = new Date(completedAt.getTime() - session.durationSeconds * 1000)
+                      const timeOptions: Intl.DateTimeFormatOptions = {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hourCycle: 'h23',
+                      }
+                      return (
+                        <article className={`study-session-card color-${session.statusColor}`} key={session.id}>
+                          <div className="study-session-card-meta">
+                            <span>Studying</span>
+                            <time dateTime={session.completedAt}>
+                              {startedAt.toLocaleTimeString(undefined, timeOptions)} - {completedAt.toLocaleTimeString(undefined, timeOptions)}
+                            </time>
+                            <span className="study-session-duration" aria-label={`${Math.round(session.durationSeconds / 60)} minutes focused`}>
+                              <svg viewBox="0 0 16 16" aria-hidden="true">
+                                <circle cx="8" cy="8" r="6.25" />
+                                <path d="M8 4.5V8l2.25 1.5" />
+                              </svg>
+                              {Math.round(session.durationSeconds / 60)}
+                            </span>
+                          </div>
+                          <div className="study-session-card-content">
+                            <strong>{session.status || 'Study session'}</strong>
+                            {session.reflection && <p>{session.reflection}</p>}
+                          </div>
+                        </article>
+                      )
+                    })}
                   </div>
-                  <div className="study-session-reflection">
-                    <span>What I learned / did</span>
-                    <p>{session.reflection}</p>
-                  </div>
-                </article>
+                </section>
               ))}
             </div>
           )}
